@@ -1,5 +1,5 @@
 #include "clip.h"
-#include "ggml/ggml.h"
+#include "ggml.h"
 #include <string>
 
 void print_usage(int argc, char ** argv) {
@@ -13,6 +13,7 @@ void print_usage(int argc, char ** argv) {
 }
 
 int main(int argc, char ** argv) {
+    ggml_time_init();
     if (argc != 4) {
         print_usage(argc, argv);
         return 1;

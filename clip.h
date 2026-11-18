@@ -1,7 +1,7 @@
 #ifndef CLIP_H
 #define CLIP_H
 
-#include "ggml/ggml.h"
+#include "ggml.h"
 #include <stdint.h>
 #include <stddef.h>
 
@@ -42,6 +42,16 @@ struct clip_tokens {
 struct clip_ctx * clip_model_load(const char * fname, const int verbosity);
 
 void clip_free(struct clip_ctx * ctx);
+
+// 选择后续 clip_model_load() 使用的计算后端（进程级，大小写不敏感）：
+//   NULL / "auto"  优先 Vulkan（构建时启用且设备可用），否则 CPU
+//   "cpu"          只用 CPU
+//   "vulkan"       强制 Vulkan；不可用时加载失败
+// 返回 0 成功，非 0 表示名称非法。
+int clip_set_backend(const char * name);
+
+// 模型实际使用的计算后端名称："CPU" / "Vulkan"；ctx 为 NULL 时返回 ""。
+const char * clip_model_backend_name(const struct clip_ctx * ctx);
 
 struct clip_text_hparams * clip_get_text_hparams(struct clip_ctx * ctx);
 struct clip_vision_hparams * clip_get_vision_hparams(struct clip_ctx * ctx);
@@ -91,6 +101,12 @@ bool clip_text_encode(const struct clip_ctx * ctx, const int n_threads, const st
                       const bool normalize);
 bool clip_image_encode(const struct clip_ctx * ctx, const int n_threads, struct clip_image_f32 * img, float * vec,
                        const bool normalize);
+
+// Raw (not L2-normalized) embeddings. Same output layout as the corresponding
+// clip_*_encode(..., normalize = false) call, exposed as a stable C ABI.
+bool clip_text_encode_raw(const struct clip_ctx * ctx, const int n_threads, const struct clip_tokens * tokens,
+                          float * vec);
+bool clip_image_encode_raw(const struct clip_ctx * ctx, const int n_threads, struct clip_image_f32 * img, float * vec);
 
 void clip_image_batch_preprocess(const struct clip_ctx * ctx, const int n_threads,
                                  const struct clip_image_u8_batch * img_inputs, struct clip_image_f32_batch * imgs_resized);

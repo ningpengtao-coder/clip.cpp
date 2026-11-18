@@ -179,7 +179,8 @@ if (${CMAKE_SYSTEM_PROCESSOR} MATCHES "arm" OR ${CMAKE_SYSTEM_PROCESSOR} MATCHES
     if (MSVC)
         # TODO: arm msvc?
     else()
-        if (${CMAKE_SYSTEM_PROCESSOR} MATCHES "aarch64")
+        if (${CMAKE_SYSTEM_PROCESSOR} MATCHES "aarch64" AND NOT ANDROID)
+            # Android NDK clang 不接受 -mcpu=native；交叉编译时使用 NDK 默认目标 CPU。
             add_compile_options(-mcpu=native)
         endif()
         # TODO: armv6,7,8 version specific flags
@@ -250,15 +251,49 @@ endif()
 
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR})
 
-add_subdirectory(ggml)
+#
+# ggml 后端
+#
+# 与 vision.cpp / audio.cpp 共用 packages/ggml 这一个 submodule
+# （https://github.com/ningpengtao-coder/ggml），不再各自维护 ggml 拷贝。
+set(CLIP_GGML_SOURCE_DIR
+    "${CMAKE_CURRENT_SOURCE_DIR}/../ggml"
+    CACHE PATH "复用的 ggml 源码目录")
+if (NOT EXISTS "${CLIP_GGML_SOURCE_DIR}/CMakeLists.txt")
+    message(FATAL_ERROR
+        "未找到 ggml 源码目录：${CLIP_GGML_SOURCE_DIR}\n"
+        "请先初始化 packages/ggml 子模块（git submodule update --init packages/ggml），"
+        "或用 -DCLIP_GGML_SOURCE_DIR=... 指定。")
+endif()
+
+option(CLIP_USE_VULKAN "CLIP: 启用 ggml Vulkan 后端（Android / 桌面 GPU）" OFF)
+
+# 上游 ggml-vulkan 只用 find_package(SPIRV-Headers CONFIG) 做依赖探测，
+# 这里默认指向仓库内的占位配置，避免额外安装系统包。
+if (CLIP_USE_VULKAN AND NOT SPIRV-Headers_DIR)
+    set(SPIRV-Headers_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/spirv-headers")
+endif()
+
+set(GGML_BUILD_TESTS OFF CACHE BOOL "不构建 ggml 上游测试" FORCE)
+set(GGML_BUILD_EXAMPLES OFF CACHE BOOL "不构建 ggml 上游示例" FORCE)
+set(GGML_ALL_WARNINGS OFF CACHE BOOL "保持 ggml 上游警告安静" FORCE)
+set(GGML_CCACHE OFF CACHE BOOL "不探测 ccache" FORCE)
+set(GGML_OPENMP OFF CACHE BOOL "不引入 libomp 运行时依赖" FORCE)
+set(GGML_VULKAN ${CLIP_USE_VULKAN} CACHE BOOL "ggml: 启用 Vulkan 后端" FORCE)
+
+add_subdirectory("${CLIP_GGML_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/ggml")
 
 add_library(clip
             clip.cpp
             clip.h)
 
-target_include_directories(clip PUBLIC .)
+target_include_directories(clip PUBLIC . PRIVATE "${CLIP_GGML_SOURCE_DIR}/include")
 target_compile_features(clip PUBLIC cxx_std_11)
 target_link_libraries(clip PRIVATE ggml ${CLIP_EXTRA_LIBS})
+
+if (CLIP_USE_VULKAN AND GGML_VULKAN)
+    target_compile_definitions(clip PRIVATE CLIP_USE_VULKAN=1)
+endif()
 
 if (BUILD_SHARED_LIBS)
     set(CLIP_BUILD_EXAMPLES OFF)
@@ -266,6 +301,11 @@ if (BUILD_SHARED_LIBS)
     set_target_properties(ggml PROPERTIES POSITION_INDEPENDENT_CODE ON)
     set_target_properties(clip PROPERTIES POSITION_INDEPENDENT_CODE ON)
     target_compile_definitions(clip PRIVATE CLIP_SHARED CLIP_BUILD)
+    if (MSVC)
+        # clip.h does not use dllexport macros, so export every symbol to make
+        # the DLL consumable via FFI (Dart/ctypes) on Windows.
+        set_target_properties(clip PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+    endif()
     set(CMAKE_INSTALL_PREFIX ${PROJECT_BINARY_DIR})
     install(TARGETS ggml clip
     LIBRARY DESTINATION ${CMAKE_CURRENT_SOURCE_DIR}/examples/python_bindings/clip_cpp)
