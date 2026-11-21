@@ -516,6 +516,16 @@ struct clip_ctx * clip_model_load(const char * fname, const int verbosity = 1) {
 
     struct gguf_context * ctx = gguf_init_from_file(fname, params);
 
+    // GGUF 解析失败时 gguf_init_from_file 返回 nullptr；必须在这里退出，
+    // 否则后续 gguf_get_* 会解引用空指针，直接让宿主进程崩溃。
+    if (ctx == nullptr) {
+        fprintf(stderr, "%s: failed to load GGUF file %s\n", __func__, fname);
+        if (meta != nullptr) {
+            ggml_free(meta);
+        }
+        return nullptr;
+    }
+
     if (verbosity >= 1) {
         const int n_tensors = gguf_get_n_tensors(ctx);
         const int n_kv = gguf_get_n_kv(ctx);
